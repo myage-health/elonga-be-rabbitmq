@@ -105,6 +105,11 @@ final class Connection implements IConnection
 
 	private function createNewConnection(): Client
 	{
-		return new Client($this->connectionParams);
+		return new Client(
+            array_merge(
+                $this->connectionParams,
+                ['ssl' => []]
+            )
+        );
 	}
 }
