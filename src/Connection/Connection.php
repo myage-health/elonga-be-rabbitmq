@@ -44,7 +44,8 @@ final class Connection implements IConnection
 		float $timeout,
 		bool $persistent,
 		string $path,
-		bool $tcpNoDelay
+		bool $tcpNoDelay,
+        bool $ssl
 	) {
 		$this->connectionParams = [
 			'host' => $host,
@@ -57,6 +58,7 @@ final class Connection implements IConnection
 			'persistent' => $persistent,
 			'path' => $path,
 			'tcp_nodelay' => $tcpNoDelay,
+            'ssl' => $ssl ? [] : null,
 		];
 
 		$this->bunnyClient = $this->createNewConnection();
@@ -105,11 +107,6 @@ final class Connection implements IConnection
 
 	private function createNewConnection(): Client
 	{
-		return new Client(
-            array_merge(
-                $this->connectionParams,
-                ['ssl' => []]
-            )
-        );
+		return new Client($this->connectionParams);
 	}
 }
