@@ -43,7 +43,7 @@ final class Connection implements IConnection
 			'timeout' => $timeout,
 			'persistent' => $persistent,
 			'path' => $path,
-			'tcp_nodelay' => $tcpNoDelay,
+			//'tcp_nodelay' => $tcpNoDelay,
 			'ssl' => $ssl,
 		];
 
