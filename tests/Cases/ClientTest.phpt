@@ -8,6 +8,7 @@ use Bunny\AbstractClient;
 use Bunny\Exception\ClientException;
 use Contributte\RabbitMQ\Connection\Client;
 use Tester\Assert;
+use Tester\Environment;
 use Tester\TestCase;
 
 require __DIR__ . '/../bootstrap.php';
@@ -58,9 +59,24 @@ final class ClientTest extends TestCase
 		}, ClientException::class, 'Broken pipe or closed connection.');
 	}
 
+	public function testFeedReadBufferCopesWithANegotiatedFrameMaxOfZero(): void
+	{
+		[$client, , $remote] = $this->createClientOnSocketPair();
+		$frameMax = new \ReflectionProperty(AbstractClient::class, 'frameMax');
+		$frameMax->setAccessible(true);
+		$frameMax->setValue($client, 0);
+		$written = $this->writeMoreThanOneChunk($remote);
+
+		$this->feedReadBuffer($client);
+
+		Assert::same($written, $this->readBufferLength($client));
+		Assert::same(0, $frameMax->getValue($client), 'The negotiated frameMax is left as it was');
+	}
+
 	/**
 	 * Writes without blocking, so the test cannot hang where unix-socket buffers are small
-	 * (about 8 KiB each way on macOS).
+	 * (about 8 KiB each way on macOS). Where the socket cannot hold more than one stream chunk
+	 * the drain cannot be observed, so the test is skipped rather than failed.
 	 *
 	 * @param resource $remote
 	 */
@@ -79,7 +95,9 @@ final class ClientTest extends TestCase
 			$written += $bytes;
 		}
 
-		Assert::true($written > self::STREAM_CHUNK_BYTES, 'The socket buffer must hold more than one stream chunk');
+		if ($written <= self::STREAM_CHUNK_BYTES) {
+			Environment::skip('The socket buffer holds no more than one stream chunk.');
+		}
 
 		return $written;
 	}

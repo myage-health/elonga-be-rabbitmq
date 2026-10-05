@@ -43,10 +43,18 @@ class Client extends BunnyClient
 	 */
 	protected function feedReadBuffer(): bool
 	{
-		parent::feedReadBuffer();
+		$negotiatedFrameMax = $this->frameMax;
+		$readLength = $negotiatedFrameMax > 0 ? $negotiatedFrameMax : self::DEFAULT_READ_LENGTH;
+
+		// Bunny's read() passes frameMax to fread() as the length, and fread() rejects 0.
+		$this->frameMax = $readLength;
+		try {
+			parent::feedReadBuffer();
+		} finally {
+			$this->frameMax = $negotiatedFrameMax;
+		}
 
 		$stream = $this->getStream();
-		$readLength = $this->frameMax > 0 ? $this->frameMax : self::DEFAULT_READ_LENGTH;
 		$wasBlocking = stream_get_meta_data($stream)['blocked'];
 		stream_set_blocking($stream, false);
 
