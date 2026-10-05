@@ -20,6 +20,37 @@ class Client extends BunnyClient
 		$this->flushWriteBuffer();
 	}
 
+	/**
+	 * Reads everything the stream can deliver right now, not just one chunk.
+	 *
+	 * Bunny's single fread() returns at most one stream chunk (8 KB). Over TLS the rest of a
+	 * larger record is already decrypted and buffered inside PHP/OpenSSL, so the socket looks
+	 * idle: run()'s stream_select() then sleeps until the next heartbeat (up to 60 s) although a
+	 * complete delivery is waiting — a prefetch-1 consumer stalls on every message > 8 KB.
+	 * Draining in non-blocking mode hands the whole delivery to the frame reader at once.
+	 *
+	 * @return bool
+	 */
+	protected function feedReadBuffer()
+	{
+		parent::feedReadBuffer();
+
+		$stream = $this->getStream();
+		$chunkLength = max(1, $this->frameMax);
+		stream_set_blocking($stream, false);
+
+		try {
+			while (is_string($data = @fread($stream, $chunkLength)) && $data !== '') {
+				$this->readBuffer->append($data);
+				$this->lastRead = microtime(true);
+			}
+		} finally {
+			stream_set_blocking($stream, true);
+		}
+
+		return true;
+	}
+
 	public function syncDisconnect(): bool
 	{
 		try {
