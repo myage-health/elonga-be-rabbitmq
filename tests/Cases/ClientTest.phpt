@@ -15,25 +15,41 @@ require __DIR__ . '/../bootstrap.php';
 final class ClientTest extends TestCase
 {
 
+	private const PAYLOAD_BYTES = 3 * 8192 + 1;
+
 	public function testFeedReadBufferDrainsEverythingAvailable(): void
 	{
 		[$client, $local, $remote] = $this->createClientOnSocketPair();
 
-		// Well above the 8 KB stream chunk a single fread() returns.
-		$payload = str_repeat('x', 100000);
-		fwrite($remote, $payload);
+		// More than the single 8192-byte stream chunk one fread() returns.
+		Assert::same(self::PAYLOAD_BYTES, fwrite($remote, str_repeat('x', self::PAYLOAD_BYTES)));
 
 		$this->feedReadBuffer($client);
 
-		Assert::same(strlen($payload), $this->readBufferLength($client));
+		Assert::same(self::PAYLOAD_BYTES, $this->readBufferLength($client));
 		Assert::true(stream_get_meta_data($local)['blocked'], 'The stream is switched back to blocking mode');
 	}
 
-	public function testFeedReadBufferStillDetectsAClosedConnection(): void
+	public function testFeedReadBufferKeepsANonBlockingStreamNonBlocking(): void
+	{
+		[$client, $local, $remote] = $this->createClientOnSocketPair();
+		stream_set_blocking($local, false);
+		fwrite($remote, 'x');
+
+		$this->feedReadBuffer($client);
+
+		Assert::false(stream_get_meta_data($local)['blocked']);
+	}
+
+	public function testFeedReadBufferReturnsTheDataAPeerSentBeforeClosing(): void
 	{
 		[$client, , $remote] = $this->createClientOnSocketPair();
 
+		Assert::same(self::PAYLOAD_BYTES, fwrite($remote, str_repeat('x', self::PAYLOAD_BYTES)));
 		fclose($remote);
+
+		$this->feedReadBuffer($client);
+		Assert::same(self::PAYLOAD_BYTES, $this->readBufferLength($client));
 
 		Assert::exception(function () use ($client): void {
 			$this->feedReadBuffer($client);

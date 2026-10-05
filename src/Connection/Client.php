@@ -12,6 +12,17 @@ use Bunny\Protocol\HeartbeatFrame;
 
 class Client extends BunnyClient
 {
+
+	/**
+	 * Upper bound of one drain. Well above what a prefetch-limited consumer can have in flight,
+	 * yet it keeps a consumer without a prefetch limit on a backlogged queue from reading forever
+	 * without ever processing a frame or sending a heartbeat.
+	 */
+	private const DRAIN_LIMIT_BYTES = 8 * 1024 * 1024;
+
+	/** Read size when the broker negotiated frameMax 0 ("no limit"). */
+	private const DEFAULT_READ_LENGTH = 65536;
+
 	/**
 	 * @throws BunnyException
 	 */
@@ -23,29 +34,31 @@ class Client extends BunnyClient
 	/**
 	 * Reads everything the stream can deliver right now, not just one chunk.
 	 *
-	 * Bunny's single fread() returns at most one stream chunk (8 KB). Over TLS the rest of a
-	 * larger record is already decrypted and buffered inside PHP/OpenSSL, so the socket looks
-	 * idle: run()'s stream_select() then sleeps until the next heartbeat (up to 60 s) although a
-	 * complete delivery is waiting — a prefetch-1 consumer stalls on every message > 8 KB.
-	 * Draining in non-blocking mode hands the whole delivery to the frame reader at once.
-	 *
-	 * @return bool
+	 * Bunny's single fread() returns at most one stream chunk (8192 bytes by default). Over TLS
+	 * the rest of a larger record is already decrypted and buffered inside PHP/OpenSSL, so the
+	 * socket looks idle: run()'s stream_select() then sleeps until the next heartbeat (up to 60 s)
+	 * although a complete delivery is waiting — a prefetch-1 consumer stalls on every message
+	 * larger than one chunk. Draining in non-blocking mode hands the whole delivery to the frame
+	 * reader at once. EOF is left to the next regular read, which detects and reports it.
 	 */
-	protected function feedReadBuffer()
+	protected function feedReadBuffer(): bool
 	{
 		parent::feedReadBuffer();
 
 		$stream = $this->getStream();
-		$chunkLength = max(1, $this->frameMax);
+		$readLength = $this->frameMax > 0 ? $this->frameMax : self::DEFAULT_READ_LENGTH;
+		$wasBlocking = stream_get_meta_data($stream)['blocked'];
 		stream_set_blocking($stream, false);
 
 		try {
-			while (is_string($data = @fread($stream, $chunkLength)) && $data !== '') {
+			$drained = 0;
+			while ($drained < self::DRAIN_LIMIT_BYTES && is_string($data = @fread($stream, $readLength)) && $data !== '') {
 				$this->readBuffer->append($data);
 				$this->lastRead = microtime(true);
+				$drained += strlen($data);
 			}
 		} finally {
-			stream_set_blocking($stream, true);
+			stream_set_blocking($stream, $wasBlocking);
 		}
 
 		return true;
